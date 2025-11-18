@@ -1,0 +1,40 @@
+﻿@model ElotePosMvc.Models.Producto
+
+@{
+    ViewData["Title"] = "Crear Producto";
+}
+
+<h1 class="display-4">Crear Nuevo Producto</h1>
+<hr />
+
+<div class="row">
+    <div class="col-md-6">
+        <form asp-action="Crear" method="post">
+
+            <div asp-validation-summary="ModelOnly" class="alert alert-danger"></div>
+
+            <div class="form-floating mb-3">
+                <input asp-for="Nombre" class="form-control" placeholder="Nombre" />
+                <label asp-for="Nombre">Nombre del Producto</label>
+                <span asp-validation-for="Nombre" class="text-danger"></span>
+            </div>
+
+            <div class="form-floating mb-3">
+                <input asp-for="PrecioVenta" class="form-control" placeholder="Precio" type="number" step="0.01" />
+                <label asp-for="PrecioVenta">Precio de Venta (ej: 25.50)</label>
+                <span asp-validation-for="PrecioVenta" class="text-danger"></span>
+            </div>
+
+            <div class="form-group mt-4">
+                <button type="submit" class="btn btn-success btn-lg">Guardar Producto</button>
+                <a asp-action="Index" class="btn btn-secondary">Cancelar</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+@section Scripts {
+    @{
+        await Html.RenderPartialAsync("_ValidationScriptsPartial");
+    }
+}

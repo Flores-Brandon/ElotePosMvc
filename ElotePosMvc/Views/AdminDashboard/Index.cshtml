@@ -1,0 +1,23 @@
+﻿@{
+    // Esto establece el título de la pestaña en el navegador
+    ViewData["Title"] = "Dashboard del Jefe";
+}
+
+<div class="container text-center mt-5">
+    <h1 class="display-4 text-success fw-bold">Bienvenido, Jefe</h1>
+
+    @if (ViewBag.NombreUsuario != null)
+    {
+        <h3 class="text-muted">Has iniciado sesión como: @ViewBag.NombreUsuario</h3>
+    }
+
+    <hr class="my-4">
+    <p class="lead">
+        Este es tu panel de control. Aquí podrás ver:
+    </p>
+    <ul class="list-unstyled fs-5">
+        <li>📈 Estadísticas de Ventas</li>
+        <li>🌽 Gestión de Productos</li>
+        <li>👨‍🍳 Gestión de Empleados</li>
+    </ul>
+</div>
