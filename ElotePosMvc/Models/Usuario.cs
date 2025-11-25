@@ -1,23 +1,28 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json.Serialization; // <--- NECESARIO PARA EL JSON IGNORE
 
 namespace ElotePosMvc.Models
 {
     public class Usuario
     {
-        [Key] // Esto le dice que es la Primary Key
+        [Key]
         public int IdUsuario { get; set; }
 
-        public int IdRol { get; set; } // La Foreign Key    
-        public string NombreCompleto { get; set; }
-        public string Username { get; set; }
-        public string PasswordHash { get; set; }
+        public string NombreCompleto { get; set; } = null!;
+
+        public string Username { get; set; } = null!;
+
+        public string PasswordHash { get; set; } = null!;
+
         public bool Activo { get; set; }
 
-        // ¡RELACIÓN FELIZ!
-        // Como 'Rol' vive en la MISMA BD (SQL Server),
-        // podemos crear una relación de navegación.
+        // La llave foránea (El número)
+        public int IdRol { get; set; }
+
+        // La relación (El objeto)
         [ForeignKey("IdRol")]
-        public virtual Rol Rol { get; set; }
+        [JsonIgnore]
+        public virtual Rol? Rol { get; set; }
     }
 }

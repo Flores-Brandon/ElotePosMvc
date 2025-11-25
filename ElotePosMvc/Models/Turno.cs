@@ -1,22 +1,29 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema; // <--- Necesario para [Column] y [Table]
 
 namespace ElotePosMvc.Models
 {
+    [Table("Turnos")] // Aseguramos que busque la tabla "Turnos"
     public class Turno
     {
         [Key]
+        [Column("IdTurno")]
         public int IdTurno { get; set; }
+
+        [Column("FechaInicio")]
         public DateTime FechaInicio { get; set; }
-        public DateTime? FechaCierre { get; set; } // El '?' permite valores nulos
 
-        // --- IDs Huérfanos (de la BD Fría) ---
+        [Column("FechaCierre")]
+        public DateTime? FechaCierre { get; set; } // Puede ser nulo
+
+        [Column("IdUsuarioAbre")]
         public int IdUsuarioAbre { get; set; }
-        public int? IdUsuarioCierra { get; set; } // El '?' permite nulos
 
-        // Relaciones dentro de la BD Caliente
-        public virtual ICollection<Venta> Ventas { get; set; }
-        public virtual ICollection<InventarioTurno> InventarioTurnos { get; set; }
+        [Column("IdUsuarioCierra")]
+        public int? IdUsuarioCierra { get; set; } // Puede ser nulo
+
+        // 👇 ESTA ES LA PROPIEDAD QUE TE FALTABA 👇
+        [Column("SaldoInicial")]
+        public decimal SaldoInicial { get; set; }
     }
 }

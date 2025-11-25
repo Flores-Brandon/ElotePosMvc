@@ -1,47 +1,63 @@
 ﻿using ElotePosMvc.Data;
 using ElotePosMvc.Models;
-using ElotePosMvc.Models.ViewModels;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
-public class UsuarioController : Controller
+namespace ElotePosMvc.Controllers
 {
-    private readonly ColdDbContext _coldDb;
-    private readonly IPasswordHasher<Usuario> _passwordHasher;
-
-    public UsuarioController(ColdDbContext coldDbContext, IPasswordHasher<Usuario> passwordHasher)
+    [Route("api/[controller]")]
+    [ApiController]
+    public class UsuariosController : ControllerBase
     {
-        _coldDb = coldDbContext;
-        _passwordHasher = passwordHasher;
-    }
+        private readonly ColdDbContext _coldDb;
+        private readonly IPasswordHasher<Usuario> _passwordHasher;
 
-    // El Jefe crea un nuevo empleado
-    [HttpPost]
-    public async Task<IActionResult> CrearEmpleado(NuevoEmpleadoViewModel model)
-    {
-        if (!ModelState.IsValid)
+        public UsuariosController(ColdDbContext coldDbContext, IPasswordHasher<Usuario> passwordHasher)
         {
-            return View(model);
+            _coldDb = coldDbContext;
+            _passwordHasher = passwordHasher;
         }
 
-        var nuevoUsuario = new Usuario
+        // GET: api/usuarios (Listar empleados)
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<dynamic>>> GetUsuarios()
         {
-            NombreCompleto = model.NombreCompleto,
-            Username = model.Username,
-            IdRol = model.IdRol, // (Asumiendo que 2 = "Empleado")
-            Activo = true
-        };
+            // Solo devolvemos lo necesario (sin la contraseña encriptada)
+            return await _coldDb.Usuarios
+                .Include(u => u.Rol)
+                .Select(u => new {
+                    u.IdUsuario,
+                    u.NombreCompleto,
+                    u.Username,
+                    Rol = u.Rol.Nombre,
+                    u.Activo
+                })
+                .ToListAsync();
+        }
 
-        // ¡LA MAGIA!
-        // Creamos el hash a partir de la contraseña del modelo
-        var hashedPassword = _passwordHasher.HashPassword(nuevoUsuario, model.Password);
+        // POST: api/usuarios (Crear nuevo)
+        [HttpPost]
+        public async Task<ActionResult<Usuario>> PostUsuario(Usuario usuario)
+        {
+            // 1. Validar si el usuario ya existe
+            if (await _coldDb.Usuarios.AnyAsync(u => u.Username == usuario.Username))
+            {
+                return BadRequest("Ese nombre de usuario ya está ocupado.");
+            }
 
-        // Guardamos el HASH, no la contraseña
-        nuevoUsuario.PasswordHash = hashedPassword;
+            // 2. ENCRIPTAR LA CONTRASEÑA (Seguridad)
+            // Tomamos la contraseña que viene plana y la convertimos en hash
+            usuario.PasswordHash = _passwordHasher.HashPassword(usuario, usuario.PasswordHash);
 
-        _coldDb.Usuarios.Add(nuevoUsuario);
-        await _coldDb.SaveChangesAsync();
+            // 3. Configuración por defecto
+            usuario.Activo = true;
 
-        return RedirectToAction("ListaEmpleados");
+            // 4. Guardar
+            _coldDb.Usuarios.Add(usuario);
+            await _coldDb.SaveChangesAsync();
+
+            return Ok(new { mensaje = "Empleado creado con éxito" });
+        }
     }
 }

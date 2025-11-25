@@ -1,90 +1,76 @@
 ﻿using ElotePosMvc.Data;
 using ElotePosMvc.Models;
-using ElotePosMvc.Models.ViewModels;
+using Microsoft.AspNetCore.Identity; // <--- Necesario para desencriptar
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.Identity;
 
 namespace ElotePosMvc.Controllers
 {
-    public class LoginController : Controller
+    [Route("api/[controller]")]
+    [ApiController]
+    public class LoginController : ControllerBase
     {
         private readonly ColdDbContext _coldDb;
         private readonly IPasswordHasher<Usuario> _passwordHasher;
 
+        // Inyectamos la base de datos Y el encriptador
         public LoginController(ColdDbContext coldDbContext, IPasswordHasher<Usuario> passwordHasher)
         {
             _coldDb = coldDbContext;
             _passwordHasher = passwordHasher;
         }
 
-        [HttpGet]
-        public IActionResult Login()
-        {
-            // ¡Revisamos si el usuario ya tiene una sesión activa!
-            if (!string.IsNullOrEmpty(HttpContext.Session.GetString("Rol")))
-            {
-                // Si la sesión existe, redirigimos a su panel
-                if (HttpContext.Session.GetString("Rol") == "Jefe")
-                {
-                    return RedirectToAction("Index", "AdminDashboard");
-                }
-                else
-                {
-                    return RedirectToAction("Index", "EmpleadoPOS");
-                }
-            }
-
-            // Si no hay sesión, SÍ mostramos la página de login
-            return View();
-        }
-
         [HttpPost]
-        public async Task<IActionResult> Login(LoginViewModel model)
+        public async Task<IActionResult> Login([FromBody] LoginDto login)
         {
-            if (!ModelState.IsValid)
-                return View(model);
-
+            // 1. Buscamos al usuario SOLO por el nombre (sin checar password todavía)
             var usuario = await _coldDb.Usuarios
-                                .Include(u => u.Rol)
-                                .FirstOrDefaultAsync(u => u.Username == model.Username);
+                .Include(u => u.Rol)
+                .FirstOrDefaultAsync(u => u.Username == login.Username);
 
-            if (usuario == null || !usuario.Activo)
+            if (usuario == null)
             {
-                ModelState.AddModelError(string.Empty, "Usuario o contraseña incorrectos.");
-                return View(model);
+                return Unauthorized("El usuario no existe.");
             }
 
-            // Verificar hash de contraseña
-            var result = _passwordHasher.VerifyHashedPassword(usuario, usuario.PasswordHash, model.Password);
-
-            if (result == PasswordVerificationResult.Failed)
+            if (!usuario.Activo)
             {
-                ModelState.AddModelError(string.Empty, "Usuario o contraseña incorrectos.");
-                return View(model);
+                return Unauthorized("Este usuario está dado de baja.");
             }
 
-            // Guardar sesión simple
+            // 2. VERIFICAMOS LA CONTRASEÑA ENCRIPTADA
+            // El hasher compara la pass que escribió Diego con la pass encriptada de la BD
+            var resultado = _passwordHasher.VerifyHashedPassword(usuario, usuario.PasswordHash, login.Password);
+
+            if (resultado == PasswordVerificationResult.Failed)
+            {
+                // Si falló la verificación, probamos si es una contraseña vieja (sin encriptar, como la del Admin)
+                if (usuario.PasswordHash != login.Password)
+                {
+                    return Unauthorized("Contraseña incorrecta.");
+                }
+            }
+
+            // 3. Si pasó, guardamos la sesión
             HttpContext.Session.SetInt32("IdUsuario", usuario.IdUsuario);
             HttpContext.Session.SetString("NombreCompleto", usuario.NombreCompleto);
-            HttpContext.Session.SetString("Rol", usuario.Rol.Nombre);
+            HttpContext.Session.SetString("Rol", usuario.Rol?.Nombre ?? "Empleado");
 
-            // Redirigir según rol
-            if (usuario.Rol.Nombre == "Jefe")
+            // 4. Respondemos al Frontend
+            return Ok(new
             {
-                return RedirectToAction("Index", "AdminDashboard");
-            }
-            else
-            {
-                return RedirectToAction("Index", "EmpleadoPOS");
-            }
+                mensaje = "Login exitoso",
+                usuario = usuario.Username,
+                rol = usuario.Rol?.Nombre,
+                idUsuario = usuario.IdUsuario
+            });
         }
+    }
 
-        [HttpPost]
-        public IActionResult Logout()
-        {
-            HttpContext.Session.Clear();
-            return RedirectToAction("Login", "Login");
-        }
+    // Clase auxiliar para recibir los datos del post
+    public class LoginDto
+    {
+        public string Username { get; set; } = null!;
+        public string Password { get; set; } = null!;
     }
 }

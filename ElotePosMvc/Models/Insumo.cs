@@ -6,7 +6,11 @@ namespace ElotePosMvc.Models
     {
         [Key]
         public int IdInsumo { get; set; }
-        public string Nombre { get; set; }
-        public string UnidadMedida { get; set; }
+
+        public string Nombre { get; set; } = null!;
+
+        public string UnidadMedida { get; set; } = null!;
+
+        public decimal Costo { get; set; }
     }
 }

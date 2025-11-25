@@ -1,175 +1,138 @@
 ﻿using ElotePosMvc.Data;
-using ElotePosMvc.Models; // ¡Importante para que reconozca 'Producto'!
+using ElotePosMvc.Models;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore; // ¡Importante para .ToListAsync()!
-using System.Threading.Tasks; // ¡Importante para 'Task'!
+using Microsoft.EntityFrameworkCore;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace ElotePosMvc.Controllers
 {
-    // ¡HEREDA DE BASECONTROLLER!
-    public class ProductosController : BaseController
+    // 1. Definimos que esto es una API y su ruta será 'api/productos'
+    [Route("api/[controller]")]
+    [ApiController]
+    public class ProductosController : ControllerBase // 2. Heredamos de ControllerBase (ideal para APIs)
     {
         private readonly ColdDbContext _coldDb;
 
-        // --- ¡AQUÍ ESTÁ LA CORRECCIÓN! ---
-        // Añadí las llaves { y } que faltaban
         public ProductosController(ColdDbContext coldDbContext)
-        { // <-- LLAVE DE APERTURA
+        {
             _coldDb = coldDbContext;
-        } // <-- LLAVE DE CIERRE
-
-        // --- ACCIÓN 1: LEER (Read) ---
-        public async Task<IActionResult> Index()
-        {
-            if (HttpContext.Session.GetString("Rol") != "Jefe")
-            {
-                return RedirectToAction("Login", "Login");
-            }
-
-            var listaDeProductos = await _coldDb.Productos.ToListAsync();
-            return View(listaDeProductos);
         }
 
-        // --- ACCIÓN 2: MOSTRAR FORMULARIO DE CREAR (Create GET) ---
-        public IActionResult Crear()
-        {
-            if (HttpContext.Session.GetString("Rol") != "Jefe")
-            {
-                return RedirectToAction("Login", "Login");
-            }
+        // --- MÉTODOS AUXILIARES DE VALIDACIÓN ---
 
-            return View();
+        // Valida si es el Patrón (Para crear, editar, borrar)
+        private bool EsJefe()
+        {
+            return HttpContext.Session.GetString("Rol") == "Jefe";
         }
 
-        // --- ACCIÓN 3: GUARDAR EL NUEVO PRODUCTO (Create POST) ---
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Crear(Producto producto)
+        // 👇 NUEVO: Valida si es CUALQUIER usuario logueado (Para ver el menú)
+        private bool HaySesion()
         {
-            if (HttpContext.Session.GetString("Rol") != "Jefe")
-            {
-                return RedirectToAction("Login", "Login");
-            }
-
-            if (ModelState.IsValid)
-            {
-                _coldDb.Productos.Add(producto);
-                await _coldDb.SaveChangesAsync();
-                return RedirectToAction(nameof(Index));
-            }
-
-            return View(producto);
+            // Si tiene ID de usuario en la sesión, es que ya entró al sistema
+            return HttpContext.Session.GetInt32("IdUsuario") != null;
         }
 
-        // --- ACCIÓN 4: MOSTRAR FORMULARIO DE EDITAR (Update GET) ---
-        // Se accede con /Productos/Editar/5 (donde 5 es el Id)
-        public async Task<IActionResult> Editar(int? id)
+        // GET: api/productos
+        // (Obtener todos los productos)
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<Producto>>> GetProductos()
         {
-            if (HttpContext.Session.GetString("Rol") != "Jefe")
-            {
-                return RedirectToAction("Login", "Login");
-            }
+            // 🔓 CAMBIO IMPORTANTE: 
+            // Antes usábamos !EsJefe(), lo que bloqueaba a los empleados.
+            // Ahora usamos !HaySesion(), permitiendo que CUALQUIERA que haya hecho login vea la lista.
+            if (!HaySesion()) return Unauthorized("Debes iniciar sesión para ver el menú");
 
-            if (id == null)
-            {
-                return NotFound(); // Error si no mandan ID
-            }
+            return await _coldDb.Productos.ToListAsync();
+        }
 
-            // Busca el producto en la BD Fría
+        // GET: api/productos/5
+        // (Obtener un solo producto por ID - Usualmente para editar)
+        [HttpGet("{id}")]
+        public async Task<ActionResult<Producto>> GetProducto(int id)
+        {
+            // Este lo dejamos protegido porque usualmente solo pides un ID específico para editarlo
+            if (!EsJefe()) return Unauthorized("No tienes permiso de Jefe");
+
             var producto = await _coldDb.Productos.FindAsync(id);
+
             if (producto == null)
             {
-                return NotFound(); // Error si no lo encuentra
+                return NotFound();
             }
 
-            // Manda el producto encontrado a la vista de "Editar"
-            return View(producto);
+            return producto;
         }
 
-        // --- ACCIÓN 5: GUARDAR LOS CAMBIOS (Update POST) ---
+        // POST: api/productos
+        // (Crear un nuevo producto)
         [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Editar(int id, Producto producto)
+        public async Task<ActionResult<Producto>> PostProducto(Producto producto)
         {
-            if (HttpContext.Session.GetString("Rol") != "Jefe")
-            {
-                return RedirectToAction("Login", "Login");
-            }
+            // 🔒 Protegido: Solo Jefe
+            if (!EsJefe()) return Unauthorized("No tienes permiso de Jefe");
 
-            // Verifica que el ID de la URL coincida con el ID del modelo
+            producto.IdProducto = 0;
+
+            _coldDb.Productos.Add(producto);
+            await _coldDb.SaveChangesAsync();
+
+            return CreatedAtAction("GetProducto", new { id = producto.IdProducto }, producto);
+        }
+
+        // PUT: api/productos/5
+        // (Actualizar un producto existente)
+        [HttpPut("{id}")]
+        public async Task<IActionResult> PutProducto(int id, Producto producto)
+        {
+            // 🔒 Protegido: Solo Jefe
+            if (!EsJefe()) return Unauthorized("No tienes permiso de Jefe");
+
             if (id != producto.IdProducto)
             {
-                return NotFound();
+                return BadRequest("El ID de la URL no coincide con el del producto");
             }
 
-            if (ModelState.IsValid)
+            _coldDb.Entry(producto).State = EntityState.Modified;
+
+            try
             {
-                try
+                await _coldDb.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                if (!_coldDb.Productos.Any(e => e.IdProducto == id))
                 {
-                    // Le dice al DbContext que este producto ha sido modificado
-                    _coldDb.Update(producto);
-                    await _coldDb.SaveChangesAsync(); // Guarda los cambios
-                }
-                catch (DbUpdateConcurrencyException)
-                {
-                    // Manejo de error por si alguien borró el producto
-                    // mientras lo estábamos editando.
                     return NotFound();
                 }
-
-                // Todo salió bien, vuelve a la lista
-                return RedirectToAction(nameof(Index));
+                else
+                {
+                    throw;
+                }
             }
 
-            // Si el modelo no es válido, muestra el formulario de nuevo
-            return View(producto);
+            return NoContent();
         }
 
-        // --- ACCIÓN 6: MOSTRAR CONFIRMACIÓN DE BORRADO (Delete GET) ---
-        // Se accede con /Productos/Eliminar/5
-        public async Task<IActionResult> Eliminar(int? id)
+        // DELETE: api/productos/5
+        // (Eliminar un producto)
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteProducto(int id)
         {
-            if (HttpContext.Session.GetString("Rol") != "Jefe")
-            {
-                return RedirectToAction("Login", "Login");
-            }
+            // 🔒 Protegido: Solo Jefe
+            if (!EsJefe()) return Unauthorized("No tienes permiso de Jefe");
 
-            if (id == null)
-            {
-                return NotFound();
-            }
-
-            // Busca el producto y lo muestra
-            var producto = await _coldDb.Productos
-                .FirstOrDefaultAsync(m => m.IdProducto == id);
+            var producto = await _coldDb.Productos.FindAsync(id);
             if (producto == null)
             {
                 return NotFound();
             }
 
-            return View(producto);
-        }
+            _coldDb.Productos.Remove(producto);
+            await _coldDb.SaveChangesAsync();
 
-        // --- ACCIÓN 7: CONFIRMAR BORRADO (Delete POST) ---
-        [HttpPost, ActionName("Eliminar")] // Le decimos que esta acción se llama "Eliminar"
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> EliminarConfirmado(int id)
-        {
-            if (HttpContext.Session.GetString("Rol") != "Jefe")
-            {
-                return RedirectToAction("Login", "Login");
-            }
-
-            // Busca el producto
-            var producto = await _coldDb.Productos.FindAsync(id);
-            if (producto != null)
-            {
-                // Lo borra del DbContext
-                _coldDb.Productos.Remove(producto);
-                await _coldDb.SaveChangesAsync(); // Aplica los cambios
-            }
-
-            return RedirectToAction(nameof(Index));
+            return NoContent();
         }
     }
 }

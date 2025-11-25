@@ -3,28 +3,35 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace ElotePosMvc.Models
 {
+    [Table("Ventas")]
     public class Venta
     {
         [Key]
+        [Column("IdVenta")]
         public int IdVenta { get; set; }
 
-        public int IdTurno { get; set; }
-
-        // ¡LA RELACIÓN ROTA!
-        // Este es el ID del 'Usuario' que vive en SQL Server.
-        // NO podemos tener un 'public virtual Usuario Usuario { get; set; }'
-        // Es solo un número huérfano.
-        public int IdUsuario { get; set; }
-
-        public DateTime FechaHora { get; set; }
+        [Column("TotalVenta")]
         public decimal TotalVenta { get; set; }
+
+        [Column("PagoRecibido")]
+        public decimal PagoRecibido { get; set; }
+
+        [Column("CambioDado")]
+        public decimal CambioDado { get; set; }
+
+        [Column("EsRegalado")]
         public bool EsRegalado { get; set; }
 
-        // ¡RELACIÓN FELIZ!
-        // 'Turno' vive en la MISMA BD (MySQL), así que esta sí funciona.
-        [ForeignKey("IdTurno")]
-        public virtual Turno Turno { get; set; }
+        [Column("FechaHora")]   
+        public DateTime FechaHora { get; set; }
 
-        // ... etc
+        [Column("IdUsuario")]
+        public int IdUsuario { get; set; }
+
+        [Column("IdTurno")]
+        public int IdTurno { get; set; }
+
+        [Column("MetodoPago")]
+        public string MetodoPago { get; set; } = "Efectivo";
     }
 }
