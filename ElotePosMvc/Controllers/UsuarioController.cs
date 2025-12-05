@@ -19,21 +19,60 @@ namespace ElotePosMvc.Controllers
             _passwordHasher = passwordHasher;
         }
 
-        // GET: api/usuarios (Listar empleados)
+        // GET: api/usuarios
         [HttpGet]
         public async Task<ActionResult<IEnumerable<dynamic>>> GetUsuarios()
         {
-            // Solo devolvemos lo necesario (sin la contraseña encriptada)
             return await _coldDb.Usuarios
+                .Where(u => u.Activo == true) // 👈 FILTRO CLAVE: Solo traemos los vivos
                 .Include(u => u.Rol)
                 .Select(u => new {
                     u.IdUsuario,
                     u.NombreCompleto,
                     u.Username,
+                    IdRol = u.IdRol, // Necesario para editar
                     Rol = u.Rol.Nombre,
                     u.Activo
                 })
                 .ToListAsync();
+        }
+
+        // PUT: api/usuarios/5 (Editar)
+        [HttpPut("{id}")]
+        public async Task<IActionResult> PutUsuario(int id, Usuario usuario)
+        {
+            var usuarioDb = await _coldDb.Usuarios.FindAsync(id);
+            if (usuarioDb == null) return NotFound();
+
+            // Actualizamos datos básicos
+            usuarioDb.NombreCompleto = usuario.NombreCompleto;
+            usuarioDb.Username = usuario.Username;
+            usuarioDb.IdRol = usuario.IdRol;
+
+            // Lógica inteligente para la contraseña:
+            // Si el campo PasswordHash viene con texto, la actualizamos.
+            // Si viene vacío o null, dejamos la contraseña vieja intacta.
+            if (!string.IsNullOrEmpty(usuario.PasswordHash))
+            {
+                usuarioDb.PasswordHash = _passwordHasher.HashPassword(usuarioDb, usuario.PasswordHash);
+            }
+
+            await _coldDb.SaveChangesAsync();
+            return NoContent();
+        }
+
+        // DELETE: api/usuarios/5 (Baja Lógica)
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteUsuario(int id)
+        {
+            var usuario = await _coldDb.Usuarios.FindAsync(id);
+            if (usuario == null) return NotFound();
+
+            // NO BORRAMOS, SOLO DESACTIVAMOS
+            usuario.Activo = false;
+
+            await _coldDb.SaveChangesAsync();
+            return NoContent();
         }
 
         // POST: api/usuarios (Crear nuevo)

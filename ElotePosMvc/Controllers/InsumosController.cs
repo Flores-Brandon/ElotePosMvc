@@ -11,43 +11,47 @@ namespace ElotePosMvc.Controllers
     {
         private readonly ColdDbContext _coldDb;
 
-        public InsumosController(ColdDbContext coldDbContext)
+        public InsumosController(ColdDbContext coldDb)
         {
-            _coldDb = coldDbContext;
-        }
-
-        private bool EsJefe()
-        {
-            return HttpContext.Session.GetString("Rol") == "Jefe";
+            _coldDb = coldDb;
         }
 
         // GET: api/insumos
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<Insumo>>> GetInsumos()
+        public async Task<IActionResult> GetInsumos()
         {
-            if (!EsJefe()) return Unauthorized("Solo el Jefe puede ver insumos");
-            return await _coldDb.Insumos.ToListAsync();
+            try
+            {
+                // Intentamos traer los datos
+                var lista = await _coldDb.Insumos.ToListAsync();
+                return Ok(lista);
+            }
+            catch (Exception ex)
+            {
+                // 🛑 AQUÍ ESTÁ EL TRUCO:
+                // Si falla, devolvemos el error exacto (incluyendo el error interno)
+                return BadRequest(new
+                {
+                    mensaje = "Error al leer Insumos",
+                    error = ex.Message,
+                    detalle = ex.InnerException?.Message
+                });
+            }
         }
 
-        // POST: api/insumos
+        // POST: api/insumos (Crear)
         [HttpPost]
         public async Task<ActionResult<Insumo>> PostInsumo(Insumo insumo)
         {
-            if (!EsJefe()) return Unauthorized("Solo el Jefe puede crear insumos");
-
-            insumo.IdInsumo = 0; // Aseguramos que sea nuevo
             _coldDb.Insumos.Add(insumo);
             await _coldDb.SaveChangesAsync();
-
             return CreatedAtAction("GetInsumos", new { id = insumo.IdInsumo }, insumo);
         }
 
-        // PUT: api/insumos/5
+        // PUT: api/insumos/5 (Editar)
         [HttpPut("{id}")]
         public async Task<IActionResult> PutInsumo(int id, Insumo insumo)
         {
-            if (!EsJefe()) return Unauthorized("Solo el Jefe puede editar");
-
             if (id != insumo.IdInsumo) return BadRequest();
 
             _coldDb.Entry(insumo).State = EntityState.Modified;
@@ -56,12 +60,10 @@ namespace ElotePosMvc.Controllers
             return NoContent();
         }
 
-        // DELETE: api/insumos/5
+        // DELETE: api/insumos/5 (Borrar)
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteInsumo(int id)
         {
-            if (!EsJefe()) return Unauthorized("Solo el Jefe puede borrar");
-
             var insumo = await _coldDb.Insumos.FindAsync(id);
             if (insumo == null) return NotFound();
 

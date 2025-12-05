@@ -22,15 +22,51 @@ namespace ElotePosMvc.Controllers
             _passwordHasher = hasher;
         }
 
+        // 1. VERIFICAR ESTADO (Y OBTENER NOMBRES)
         [HttpGet("estado")]
         public async Task<IActionResult> VerificarEstado()
         {
-            var turnoAbierto = await _hotDb.Turnos
+            // A. Buscamos el ÚLTIMO turno registrado (sea abierto o cerrado)
+            var ultimoTurno = await _hotDb.Turnos
                                     .OrderByDescending(t => t.IdTurno)
-                                    .FirstOrDefaultAsync(t => t.FechaCierre == null);
+                                    .FirstOrDefaultAsync();
 
-            if (turnoAbierto != null) return Ok(new { abierto = true, turno = turnoAbierto });
-            return Ok(new { abierto = false });
+            // CASO 1: No existe ningún turno en la historia
+            if (ultimoTurno == null)
+            {
+                return Ok(new { abierto = false, usuarioCierra = "Sistema Nuevo" });
+            }
+
+            // CASO 2: El último turno sigue ABIERTO (FechaCierre es null)
+            if (ultimoTurno.FechaCierre == null)
+            {
+                // Buscamos el nombre del usuario que abrió en la ColdDb
+                var nombreUsuario = "Desconocido";
+                var usuario = await _coldDb.Usuarios.FindAsync(ultimoTurno.IdUsuarioAbre);
+                if (usuario != null) nombreUsuario = usuario.NombreCompleto ?? usuario.Username;
+
+                return Ok(new
+                {
+                    abierto = true,
+                    turno = ultimoTurno,
+                    usuarioAbre = nombreUsuario // <--- Enviamos el nombre
+                });
+            }
+
+            // CASO 3: El último turno está CERRADO
+            else
+            {
+                // Buscamos el nombre del usuario que cerró
+                var nombreUsuario = "Desconocido";
+                var usuario = await _coldDb.Usuarios.FindAsync(ultimoTurno.IdUsuarioCierra);
+                if (usuario != null) nombreUsuario = usuario.NombreCompleto ?? usuario.Username;
+
+                return Ok(new
+                {
+                    abierto = false,
+                    usuarioCierra = nombreUsuario // <--- Enviamos el nombre
+                });
+            }
         }
 
         // --- MÉTODO AUXILIAR PARA VALIDAR CREDENCIALES ---
