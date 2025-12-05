@@ -3,96 +3,99 @@ using ElotePosMvc.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Collections.Generic;
+using System.Linq; // Necesario para Headers
 using System.Threading.Tasks;
 
 namespace ElotePosMvc.Controllers
 {
-    // 1. Definimos que esto es una API y su ruta será 'api/productos'
     [Route("api/[controller]")]
     [ApiController]
-    public class ProductosController : ControllerBase // 2. Heredamos de ControllerBase (ideal para APIs)
+    public class ProductosController : ControllerBase
     {
         private readonly ColdDbContext _coldDb;
+
+        // 🔐 TU CONTRASEÑA MAESTRA
+        // Debe ser IGUAL a la que pusiste en el MVC
+        private const string API_KEY_SECRETA = "EloteSecreto2025";
 
         public ProductosController(ColdDbContext coldDbContext)
         {
             _coldDb = coldDbContext;
         }
 
-        // --- MÉTODOS AUXILIARES DE VALIDACIÓN ---
+        // --- MÉTODOS DE SEGURIDAD ---
 
-        // Valida si es el Patrón (Para crear, editar, borrar)
-        private bool EsJefe()
+        // Validar si la petición trae la Llave Maestra (Desde tu MVC)
+        private bool EsLaApiAdmin()
         {
-            return HttpContext.Session.GetString("Rol") == "Jefe";
+            var llaveRecibida = Request.Headers["X-ELOTE-KEY"].FirstOrDefault();
+            return llaveRecibida == API_KEY_SECRETA;
         }
 
-        // 👇 NUEVO: Valida si es CUALQUIER usuario logueado (Para ver el menú)
-        private bool HaySesion()
+        // Validar Permiso de LECTURA (Ver menú)
+        // Pasa si: Es la API Admin -O- Hay cualquier usuario logueado en caja
+        private bool TienePermisoLectura()
         {
-            // Si tiene ID de usuario en la sesión, es que ya entró al sistema
+            if (EsLaApiAdmin()) return true;
             return HttpContext.Session.GetInt32("IdUsuario") != null;
         }
 
+        // Validar Permiso de ESCRITURA (Crear/Borrar)
+        // Pasa si: Es la API Admin -O- El usuario en caja es "Jefe"
+        private bool TienePermisoEscritura()
+        {
+            if (EsLaApiAdmin()) return true;
+            return HttpContext.Session.GetString("Rol") == "Jefe";
+        }
+
+        // --- ENDPOINTS ---
+
         // GET: api/productos
-        // (Obtener todos los productos)
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Producto>>> GetProductos()
         {
-            // 🔓 CAMBIO IMPORTANTE: 
-            // Antes usábamos !EsJefe(), lo que bloqueaba a los empleados.
-            // Ahora usamos !HaySesion(), permitiendo que CUALQUIERA que haya hecho login vea la lista.
-            if (!HaySesion()) return Unauthorized("Debes iniciar sesión para ver el menú");
+            // Verificamos lectura (Cualquier empleado o el MVC)
+            if (!TienePermisoLectura()) return Unauthorized("Acceso denegado.");
 
             return await _coldDb.Productos.ToListAsync();
         }
 
         // GET: api/productos/5
-        // (Obtener un solo producto por ID - Usualmente para editar)
         [HttpGet("{id}")]
         public async Task<ActionResult<Producto>> GetProducto(int id)
         {
-            // Este lo dejamos protegido porque usualmente solo pides un ID específico para editarlo
-            if (!EsJefe()) return Unauthorized("No tienes permiso de Jefe");
+            // Para ver detalle también permitimos lectura general
+            if (!TienePermisoLectura()) return Unauthorized("Acceso denegado.");
 
             var producto = await _coldDb.Productos.FindAsync(id);
 
-            if (producto == null)
-            {
-                return NotFound();
-            }
+            if (producto == null) return NotFound();
 
             return producto;
         }
 
-        // POST: api/productos
-        // (Crear un nuevo producto)
+        // POST: api/productos (Crear)
         [HttpPost]
         public async Task<ActionResult<Producto>> PostProducto(Producto producto)
         {
-            // 🔒 Protegido: Solo Jefe
-            if (!EsJefe()) return Unauthorized("No tienes permiso de Jefe");
+            // 🔒 Solo Jefe o API Admin pueden crear
+            if (!TienePermisoEscritura()) return Unauthorized("Se requiere permiso de Jefe.");
 
-            producto.IdProducto = 0;
-
+            producto.IdProducto = 0; // Aseguramos que sea nuevo ID
             _coldDb.Productos.Add(producto);
             await _coldDb.SaveChangesAsync();
 
             return CreatedAtAction("GetProducto", new { id = producto.IdProducto }, producto);
         }
 
-        // PUT: api/productos/5
-        // (Actualizar un producto existente)
+        // PUT: api/productos/5 (Editar)
         [HttpPut("{id}")]
         public async Task<IActionResult> PutProducto(int id, Producto producto)
         {
-            // 🔒 Protegido: Solo Jefe
-            if (!EsJefe()) return Unauthorized("No tienes permiso de Jefe");
+            // 🔒 Solo Jefe o API Admin pueden editar
+            if (!TienePermisoEscritura()) return Unauthorized("Se requiere permiso de Jefe.");
 
-            if (id != producto.IdProducto)
-            {
-                return BadRequest("El ID de la URL no coincide con el del producto");
-            }
+            if (id != producto.IdProducto) return BadRequest("IDs no coinciden");
 
             _coldDb.Entry(producto).State = EntityState.Modified;
 
@@ -102,32 +105,22 @@ namespace ElotePosMvc.Controllers
             }
             catch (DbUpdateConcurrencyException)
             {
-                if (!_coldDb.Productos.Any(e => e.IdProducto == id))
-                {
-                    return NotFound();
-                }
-                else
-                {
-                    throw;
-                }
+                if (!_coldDb.Productos.Any(e => e.IdProducto == id)) return NotFound();
+                else throw;
             }
 
             return NoContent();
         }
 
-        // DELETE: api/productos/5
-        // (Eliminar un producto)
+        // DELETE: api/productos/5 (Borrar)
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteProducto(int id)
         {
-            // 🔒 Protegido: Solo Jefe
-            if (!EsJefe()) return Unauthorized("No tienes permiso de Jefe");
+            // 🔒 Solo Jefe o API Admin pueden borrar
+            if (!TienePermisoEscritura()) return Unauthorized("Se requiere permiso de Jefe.");
 
             var producto = await _coldDb.Productos.FindAsync(id);
-            if (producto == null)
-            {
-                return NotFound();
-            }
+            if (producto == null) return NotFound();
 
             _coldDb.Productos.Remove(producto);
             await _coldDb.SaveChangesAsync();

@@ -1,7 +1,9 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace ElotePosMvc.Models
 {
+    [Table("Insumos")]
     public class Insumo
     {
         [Key]
@@ -11,6 +13,7 @@ namespace ElotePosMvc.Models
 
         public string UnidadMedida { get; set; } = null!;
 
-        public decimal Costo { get; set; }
+        public int Stock { get; set; }
+
     }
 }
