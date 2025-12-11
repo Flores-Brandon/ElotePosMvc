@@ -1,8 +1,8 @@
-﻿using ElotePosMvc.Data;
-using ElotePosMvc.Models;
-using Microsoft.AspNetCore.Identity; // <--- Necesario para desencriptar
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using ElotePosMvc.Data;
+using ElotePosMvc.Models;
+using Microsoft.AspNetCore.Identity; // Necesario para IPasswordHasher
 
 namespace ElotePosMvc.Controllers
 {
@@ -13,7 +13,7 @@ namespace ElotePosMvc.Controllers
         private readonly ColdDbContext _coldDb;
         private readonly IPasswordHasher<Usuario> _passwordHasher;
 
-        // Inyectamos la base de datos Y el encriptador
+        // Inyectamos el contexto (que ahora apunta a SQL Server) y el hasher
         public LoginController(ColdDbContext coldDbContext, IPasswordHasher<Usuario> passwordHasher)
         {
             _coldDb = coldDbContext;
@@ -23,51 +23,60 @@ namespace ElotePosMvc.Controllers
         [HttpPost]
         public async Task<IActionResult> Login([FromBody] LoginDto login)
         {
-            // 1. Buscamos al usuario SOLO por el nombre (sin checar password todavía)
-            var usuario = await _coldDb.Usuarios
-                .Include(u => u.Rol)
-                .FirstOrDefaultAsync(u => u.Username == login.Username);
-
-            if (usuario == null)
+            try
             {
-                return Unauthorized("El usuario no existe.");
-            }
+                // 1. Buscamos al usuario
+                var usuario = await _coldDb.Usuarios
+                    .Include(u => u.Rol)
+                    .FirstOrDefaultAsync(u => u.Username == login.Username);
 
-            if (!usuario.Activo)
-            {
-                return Unauthorized("Este usuario está dado de baja.");
-            }
+                if (usuario == null) return Unauthorized(new { message = "El usuario no existe." });
+                if (!usuario.Activo) return Unauthorized(new { message = "Usuario inactivo." });
 
-            // 2. VERIFICAMOS LA CONTRASEÑA ENCRIPTADA
-            // El hasher compara la pass que escribió Diego con la pass encriptada de la BD
-            var resultado = _passwordHasher.VerifyHashedPassword(usuario, usuario.PasswordHash, login.Password);
+                // 2. Verificamos password
+                var resultado = _passwordHasher.VerifyHashedPassword(usuario, usuario.PasswordHash, login.Password);
 
-            if (resultado == PasswordVerificationResult.Failed)
-            {
-                // Si falló la verificación, probamos si es una contraseña vieja (sin encriptar, como la del Admin)
-                if (usuario.PasswordHash != login.Password)
+                if (resultado == PasswordVerificationResult.Failed)
                 {
-                    return Unauthorized("Contraseña incorrecta.");
+                    if (usuario.PasswordHash != login.Password) return Unauthorized(new { message = "Contraseña incorrecta." });
                 }
+
+                // 3. INTENTO DE CREAR SESIÓN (Aquí suele fallar si falta configuración)
+                HttpContext.Session.SetInt32("IdUsuario", usuario.IdUsuario);
+                HttpContext.Session.SetString("NombreCompleto", usuario.NombreCompleto ?? usuario.Username);
+                HttpContext.Session.SetString("Rol", usuario.Rol?.Nombre ?? "Empleado");
+
+                await HttpContext.Session.CommitAsync();
+
+                return Ok(new
+                {
+                    message = "Login exitoso",
+                    usuario = usuario.Username,
+                    rol = usuario.Rol?.Nombre,
+                    idUsuario = usuario.IdUsuario
+                });
             }
-
-            // 3. Si pasó, guardamos la sesión
-            HttpContext.Session.SetInt32("IdUsuario", usuario.IdUsuario);
-            HttpContext.Session.SetString("NombreCompleto", usuario.NombreCompleto);
-            HttpContext.Session.SetString("Rol", usuario.Rol?.Nombre ?? "Empleado");
-
-            // 4. Respondemos al Frontend
-            return Ok(new
+            catch (Exception ex)
             {
-                mensaje = "Login exitoso",
-                usuario = usuario.Username,
-                rol = usuario.Rol?.Nombre,
-                idUsuario = usuario.IdUsuario
-            });
+                // ESTO NOS DIRÁ EL ERROR EXACTO EN LA CONSOLA DEL NAVEGADOR
+                return StatusCode(500, new
+                {
+                    error = "Error Interno",
+                    detalle = ex.Message,
+                    origen = ex.StackTrace
+                });
+            }
+        }
+        // Endpoint extra para cerrar sesión
+        [HttpPost("logout")]
+        public IActionResult Logout()
+        {
+            HttpContext.Session.Clear();
+            return Ok(new { message = "Sesión cerrada correctamente" });
         }
     }
 
-    // Clase auxiliar para recibir los datos del post
+    // DTO para recibir los datos
     public class LoginDto
     {
         public string Username { get; set; } = null!;

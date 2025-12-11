@@ -3,22 +3,24 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace ElotePosMvc.Models
 {
-    public class DetallesVenta
+    // 🛠️ CORRECCIÓN: Apuntamos a la tabla plural 'detalleventas'
+    [Table("detalleventas")]
+    public class DetalleVenta
     {
         [Key]
-        public int IdDetalleVenta { get; set; }
+        public int IdDetalle { get; set; }
+
         public int IdVenta { get; set; }
-
-        // --- ID Huérfano (de la BD Fría) ---
         public int IdProducto { get; set; }
-
+        public string NombreProducto { get; set; }
         public int Cantidad { get; set; }
 
         [Column(TypeName = "decimal(10, 2)")]
-        public decimal PrecioUnitarioHistorico { get; set; }
+        public decimal PrecioUnitario { get; set; }
 
-        // Relación (dentro de la BD Caliente)
-        [ForeignKey("IdVenta")]
-        public virtual Venta Venta { get; set; }
+        [Column(TypeName = "decimal(10, 2)")]
+        public decimal Subtotal { get; set; }
+
+        public int? IdUsuarioCreacion { get; set; }
     }
 }

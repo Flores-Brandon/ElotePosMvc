@@ -3,7 +3,7 @@ using ElotePosMvc.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Collections.Generic;
-using System.Linq; // Necesario para Headers
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace ElotePosMvc.Controllers
@@ -13,9 +13,6 @@ namespace ElotePosMvc.Controllers
     public class ProductosController : ControllerBase
     {
         private readonly ColdDbContext _coldDb;
-
-        // 🔐 TU CONTRASEÑA MAESTRA
-        // Debe ser IGUAL a la que pusiste en el MVC
         private const string API_KEY_SECRETA = "EloteSecreto2025";
 
         public ProductosController(ColdDbContext coldDbContext)
@@ -23,25 +20,15 @@ namespace ElotePosMvc.Controllers
             _coldDb = coldDbContext;
         }
 
-        // --- MÉTODOS DE SEGURIDAD ---
+        // --- SEGURIDAD ---
+        private bool EsLaApiAdmin() => Request.Headers["X-ELOTE-KEY"].FirstOrDefault() == API_KEY_SECRETA;
 
-        // Validar si la petición trae la Llave Maestra (Desde tu MVC)
-        private bool EsLaApiAdmin()
-        {
-            var llaveRecibida = Request.Headers["X-ELOTE-KEY"].FirstOrDefault();
-            return llaveRecibida == API_KEY_SECRETA;
-        }
-
-        // Validar Permiso de LECTURA (Ver menú)
-        // Pasa si: Es la API Admin -O- Hay cualquier usuario logueado en caja
         private bool TienePermisoLectura()
         {
             if (EsLaApiAdmin()) return true;
             return HttpContext.Session.GetInt32("IdUsuario") != null;
         }
 
-        // Validar Permiso de ESCRITURA (Crear/Borrar)
-        // Pasa si: Es la API Admin -O- El usuario en caja es "Jefe"
         private bool TienePermisoEscritura()
         {
             if (EsLaApiAdmin()) return true;
@@ -54,50 +41,75 @@ namespace ElotePosMvc.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Producto>>> GetProductos()
         {
-            // Verificamos lectura (Cualquier empleado o el MVC)
             if (!TienePermisoLectura()) return Unauthorized("Acceso denegado.");
 
-            return await _coldDb.Productos.ToListAsync();
+            // ⚠️ FILTRO IMPORTANTE: Solo traemos los Activos
+            return await _coldDb.Productos
+                                .Where(p => p.Activo == true)
+                                .ToListAsync();
         }
 
         // GET: api/productos/5
         [HttpGet("{id}")]
         public async Task<ActionResult<Producto>> GetProducto(int id)
         {
-            // Para ver detalle también permitimos lectura general
             if (!TienePermisoLectura()) return Unauthorized("Acceso denegado.");
 
             var producto = await _coldDb.Productos.FindAsync(id);
 
-            if (producto == null) return NotFound();
+            // Verificamos que exista Y que esté activo
+            if (producto == null || producto.Activo == false) return NotFound();
 
             return producto;
         }
 
-        // POST: api/productos (Crear)
+        // POST: api/productos (Crear + Auditoría)
         [HttpPost]
         public async Task<ActionResult<Producto>> PostProducto(Producto producto)
         {
-            // 🔒 Solo Jefe o API Admin pueden crear
             if (!TienePermisoEscritura()) return Unauthorized("Se requiere permiso de Jefe.");
 
-            producto.IdProducto = 0; // Aseguramos que sea nuevo ID
+            // 1. Obtener Usuario Actual
+            int? idUsuario = HttpContext.Session.GetInt32("IdUsuario");
+
+            // 2. Llenar Auditoría Automática
+            producto.IdProducto = 0; // Nuevo ID
+            producto.Activo = true;  // Nace vivo
+            producto.IdUsuarioCreacion = idUsuario ?? 1; // 1 si no hay sesión (Admin por defecto)
+            producto.FechaCreacion = DateTime.Now;
+
+            // Limpiamos modificación por si acaso
+            producto.IdUsuarioModificacion = null;
+            producto.FechaModificacion = null;
+
             _coldDb.Productos.Add(producto);
             await _coldDb.SaveChangesAsync();
 
             return CreatedAtAction("GetProducto", new { id = producto.IdProducto }, producto);
         }
 
-        // PUT: api/productos/5 (Editar)
+        // PUT: api/productos/5 (Editar + Auditoría)
         [HttpPut("{id}")]
-        public async Task<IActionResult> PutProducto(int id, Producto producto)
+        public async Task<IActionResult> PutProducto(int id, Producto productoFront)
         {
-            // 🔒 Solo Jefe o API Admin pueden editar
             if (!TienePermisoEscritura()) return Unauthorized("Se requiere permiso de Jefe.");
+            if (id != productoFront.IdProducto) return BadRequest("IDs no coinciden");
 
-            if (id != producto.IdProducto) return BadRequest("IDs no coinciden");
+            // 1. Buscamos el original en BD para no perder datos de creación
+            var productoDB = await _coldDb.Productos.FindAsync(id);
+            if (productoDB == null || productoDB.Activo == false) return NotFound();
 
-            _coldDb.Entry(producto).State = EntityState.Modified;
+            // 2. Obtener Usuario Actual
+            int? idUsuario = HttpContext.Session.GetInt32("IdUsuario");
+
+            // 3. Actualizar DATOS DE NEGOCIO
+            productoDB.Nombre = productoFront.Nombre;
+            productoDB.PrecioVenta = productoFront.PrecioVenta;
+            // (Si tienes IdCategoria u otros, actualízalos aquí también)
+
+            // 4. Actualizar AUDITORÍA (Quién modificó)
+            productoDB.IdUsuarioModificacion = idUsuario ?? 1;
+            productoDB.FechaModificacion = DateTime.Now;
 
             try
             {
@@ -112,17 +124,25 @@ namespace ElotePosMvc.Controllers
             return NoContent();
         }
 
-        // DELETE: api/productos/5 (Borrar)
+        // DELETE: api/productos/5 (Soft Delete + Auditoría)
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteProducto(int id)
         {
-            // 🔒 Solo Jefe o API Admin pueden borrar
             if (!TienePermisoEscritura()) return Unauthorized("Se requiere permiso de Jefe.");
 
             var producto = await _coldDb.Productos.FindAsync(id);
             if (producto == null) return NotFound();
 
-            _coldDb.Productos.Remove(producto);
+            // 1. Obtener Usuario Actual
+            int? idUsuario = HttpContext.Session.GetInt32("IdUsuario");
+
+            // 2. BORRADO LÓGICO (No Removemos, solo desactivamos)
+            producto.Activo = false;
+
+            // 3. Registramos quién lo eliminó
+            producto.IdUsuarioModificacion = idUsuario ?? 1;
+            producto.FechaModificacion = DateTime.Now;
+
             await _coldDb.SaveChangesAsync();
 
             return NoContent();
