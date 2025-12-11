@@ -43,7 +43,7 @@ namespace ElotePosMvc.Controllers
                 // Traemos los datos. EF usará la Vista de SQL Server que apunta a MySQL
                 var queryBase = await _hotDb.Ventas
                                             .OrderByDescending(v => v.FechaHora)
-                                            .Take(1000) // Límite de seguridad
+                                            //.Take(1000) // Límite de seguridad
                                             .ToListAsync();
 
                 IEnumerable<Venta> resultado = queryBase;
