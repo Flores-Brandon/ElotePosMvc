@@ -3,48 +3,82 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ElotePosMvc.Data
 {
-    // Este contexto maneja las operaciones de ALTA FRECUENCIA (HOT DATA)
-    // Estas entidades se mapean a las tablas de MySQL a través de Vistas de SQL Server
-    // (o directamente si usas el Linked Server como puente).
     public class HotDbContext : DbContext
     {
         public HotDbContext(DbContextOptions<HotDbContext> options) : base(options)
         {
         }
 
-        // --- Entidades Mapeadas a MySQL (a través de Linked Server) ---
+        // =========================================================
+        // 🟢 ZONA 1: TABLAS NATIVAS DE SQL SERVER (Tus 20 tablas)
+        // =========================================================
 
-        // La tabla 'turnos' de MySQL
+        // 1. Módulo de Seguridad (Lo que ya tenías)
+        public DbSet<Usuario> Usuarios { get; set; }
+        public DbSet<Rol> Roles { get; set; } // Si tienes tabla Roles
+
+        // 2. Módulo de Productos (Lo que ya tenías)
+        public DbSet<Producto> Productos { get; set; }
+
+        // 3. Módulo de Recursos Humanos (RRHH) - ¡NUEVO!
+        public DbSet<Departamento> Departamentos { get; set; }
+        public DbSet<Puesto> Puestos { get; set; }
+        public DbSet<Empleado> Empleados { get; set; }
+        // public DbSet<Nomina> Nominas { get; set; } // Descomentar si creas el modelo
+
+        // 4. Módulo de Compras y Proveedores - ¡NUEVO!
+        // (Agregamos de una vez Proveedores para el siguiente paso)
+        public DbSet<Proveedor> Proveedores { get; set; }
+        // public DbSet<Compra> Compras { get; set; }
+
+        // 5. Módulo de Inventario - ¡NUEVO!
+        // public DbSet<Insumo> Insumos { get; set; }
+        // public DbSet<Categoria> Categorias { get; set; }
+
+
+        // =========================================================
+        // 🟠 ZONA 2: VISTAS LINKED SERVER (Datos de MySQL)
+        // =========================================================
+
+        // Estas no son tablas reales en SQL Server, son ventanas hacia MySQL
         public DbSet<Turno> Turnos { get; set; }
-
-        // La tabla 'ventas' de MySQL
         public DbSet<Venta> Ventas { get; set; }
-
-        // La tabla 'detalleventa' de MySQL
-        // Nota: Si solo usas esta tabla para lectura de reportes, podrías usar HasNoKey().
-        // Si no la usas en EF Core, podrías omitirla o mapearla.
-        public DbSet<DetalleVenta> DetalleVenta { get; set; }
+        public DbSet<DetalleVenta> DetalleVentas { get; set; } // Plural en el DbSet es mejor práctica
 
 
+        // =========================================================
+        // ⚙️ CONFIGURACIÓN DE MAPEO
+        // =========================================================
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
 
-            // 1. Configuración de Turno
+            // --- Configuración MySQL (Vistas) ---
+
             modelBuilder.Entity<Turno>()
-                // Mapeo a la vista o tabla que expone los datos de MySQL en SQL Server
-                .ToView("v_TurnosMysql") // Asume que creaste una Vista en SQL Server
+                .ToView("v_TurnosMysql") // Mapea a la Vista
                 .HasKey(t => t.IdTurno);
 
-            // 2. Configuración de Venta
             modelBuilder.Entity<Venta>()
-                .ToView("v_VentasMysql") // Asume que creaste una Vista en SQL Server
+                .ToView("v_VentasMysql")
                 .HasKey(v => v.IdVenta);
 
-            // 3. Configuración de DetalleVenta
             modelBuilder.Entity<DetalleVenta>()
-                .ToView("v_DetalleVentaMysql") // Si usas vista
-                .HasKey(dv => dv.IdDetalle);   // <--- OJO: Debe ser dv.IdDetalle
+                .ToView("v_DetalleVentaMysql")
+                .HasKey(dv => dv.IdDetalle);
+
+            // --- Configuración SQL Server (Tablas Nativas) ---
+            // Entity Framework suele detectar las tablas automáticamente por el nombre del DbSet,
+            // pero si quieres asegurar nombres específicos, puedes hacerlo aquí:
+
+            modelBuilder.Entity<Usuario>().ToTable("Usuarios");
+            modelBuilder.Entity<Producto>().ToTable("Productos");
+
+            // Nuevas tablas
+            modelBuilder.Entity<Departamento>().ToTable("Departamentos");
+            modelBuilder.Entity<Puesto>().ToTable("Puestos");
+            modelBuilder.Entity<Empleado>().ToTable("Empleados");
+            modelBuilder.Entity<Proveedor>().ToTable("Proveedores");
         }
     }
 }

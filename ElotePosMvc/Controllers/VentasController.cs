@@ -33,43 +33,85 @@ namespace ElotePosMvc.Controllers
             catch { return DateTime.UtcNow.AddHours(-6); }
         }
 
-        // 👇 ESTE ES EL MÉTODO QUE TE FALTABA (Solución Error 405) 👇
-        // GET: api/ventas?inicio=...&fin=...
+        // =========================================================================
+        // GET: api/ventas
+        // ✅ APROBADO POR EL MAESTRO: Usa Stored Procedure con Pass-Through
+        // =========================================================================
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<Venta>>> GetVentas([FromQuery] DateTime? inicio, [FromQuery] DateTime? fin)
+        public async Task<IActionResult> GetVentas(
+            [FromQuery] DateTime? inicio,
+            [FromQuery] DateTime? fin,
+            [FromQuery] bool exportar = false,
+            [FromQuery] int pagina = 1,
+            [FromQuery] int cantidad = 10)
         {
             try
             {
-                // Traemos los datos. EF usará la Vista de SQL Server que apunta a MySQL
-                var queryBase = await _hotDb.Ventas
-                                            .OrderByDescending(v => v.FechaHora)
-                                            //.Take(1000) // Límite de seguridad
-                                            .ToListAsync();
+                // Validación de fechas
+                if (!inicio.HasValue) inicio = DateTime.Today;
+                if (!fin.HasValue) fin = DateTime.Today.AddDays(1).AddSeconds(-1);
+                else fin = fin.Value.Date.AddDays(1).AddSeconds(-1);
 
-                IEnumerable<Venta> resultado = queryBase;
+                // Formateamos fechas para SQL
+                string fechaIniStr = inicio.Value.ToString("yyyy-MM-dd HH:mm:ss");
+                string fechaFinStr = fin.Value.ToString("yyyy-MM-dd HH:mm:ss");
 
-                // Filtros de fecha en memoria (C#) para evitar problemas de traducción SQL
-                if (inicio.HasValue)
-                    resultado = resultado.Where(v => v.FechaHora.Date >= inicio.Value.Date);
+                // 1. OBTENER EL TOTAL (Para que Angular sepa cuántas páginas son)
+                // Usamos OPENQUERY para contar rápido sin traer los datos
+                int totalRegistros = 0;
 
-                if (fin.HasValue)
-                    resultado = resultado.Where(v => v.FechaHora.Date <= fin.Value.Date);
+                if (!exportar)
+                {
+                    string sqlCount = $@"
+                        SELECT Total FROM OPENQUERY(MYSQL_LINK, 
+                        'SELECT COUNT(*) as Total FROM ventas 
+                         WHERE FechaHora >= ''{fechaIniStr}'' AND FechaHora <= ''{fechaFinStr}'' ')";
 
-                return Ok(resultado.ToList());
+                    try
+                    {
+                        using (var command = _hotDb.Database.GetDbConnection().CreateCommand())
+                        {
+                            command.CommandText = sqlCount;
+                            _hotDb.Database.OpenConnection();
+                            using (var result = await command.ExecuteReaderAsync())
+                            {
+                                if (result.Read()) totalRegistros = Convert.ToInt32(result["Total"]);
+                            }
+                        }
+                    }
+                    catch { totalRegistros = 1000; } // Fallback si falla el conteo
+                }
+
+                // 2. TRAER LOS DATOS USANDO EL STORED PROCEDURE
+                // Esto ejecuta la consulta directamente en MySQL (Pass-Through)
+                // C# le manda: EXEC sp_ObtenerHistorialPassThrough ...
+                var listaDatos = await _hotDb.Ventas
+                    .FromSqlRaw("EXEC sp_ObtenerHistorialPassThrough {0}, {1}, {2}, {3}, {4}",
+                                inicio, fin, pagina, cantidad, exportar)
+                    .ToListAsync();
+
+                // 3. RETORNAR JSON
+                return Ok(new
+                {
+                    Total = exportar ? listaDatos.Count : totalRegistros,
+                    Datos = listaDatos
+                });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { mensaje = "Error cargando historial", error = ex.Message });
+                return StatusCode(500, new { mensaje = "Error en Pass-Through", error = ex.Message });
             }
         }
 
-        // GET: api/ventas/hoy (Para el Dashboard/Caja)
+        // GET: api/ventas/hoy (Dashboard)
         [HttpGet("hoy")]
         public async Task<IActionResult> ObtenerVentasHoy()
         {
             try
             {
+                // Aquí usamos AsNoTracking para que sea ligero
                 var ultimasVentas = await _hotDb.Ventas
+                                    .AsNoTracking()
                                     .OrderByDescending(v => v.FechaHora)
                                     .Take(500)
                                     .ToListAsync();
@@ -86,7 +128,7 @@ namespace ElotePosMvc.Controllers
             }
         }
 
-        // POST: api/ventas (Para cobrar)
+        // POST: api/ventas (Cobrar)
         [HttpPost]
         public async Task<ActionResult<Venta>> PostVenta(Venta venta)
         {
@@ -103,13 +145,13 @@ namespace ElotePosMvc.Controllers
             if (venta.IdFormaPago == 1 && venta.CambioDado == 0 && venta.PagoRecibido >= venta.TotalVenta)
                 venta.CambioDado = venta.PagoRecibido - venta.TotalVenta;
 
-            // FORMATO DECIMAL SEGURO (Solución Error 500 al guardar)
+            // FORMATO DECIMAL SEGURO
             string totalStr = venta.TotalVenta.ToString(CultureInfo.InvariantCulture);
             string pagoStr = venta.PagoRecibido.ToString(CultureInfo.InvariantCulture);
             string cambioStr = venta.CambioDado.ToString(CultureInfo.InvariantCulture);
             string fechaFormat = venta.FechaHora.ToString("yyyy-MM-dd HH:mm:ss");
 
-            // SQL RAW VENTA
+            // SQL RAW PASS-THROUGH (INSERT)
             string sqlInsertVenta = $@"
                 EXEC('
                     INSERT INTO ventas (IdTurno, IdUsuario, TotalVenta, PagoRecibido, CambioDado, IdFormaPago, IdTipoVenta, FechaHora, IdUsuarioCreacion)
@@ -120,7 +162,7 @@ namespace ElotePosMvc.Controllers
             {
                 await _hotDb.Database.ExecuteSqlRawAsync(sqlInsertVenta);
 
-                // RECUPERAR ID
+                // RECUPERAR ID (Consultamos la tabla local mapeada para obtener el último ID)
                 var ventaRecienCreada = await _hotDb.Ventas.OrderByDescending(v => v.IdVenta).FirstOrDefaultAsync();
 
                 if (ventaRecienCreada != null && venta.Productos != null && venta.Productos.Any())
@@ -135,7 +177,6 @@ namespace ElotePosMvc.Controllers
                         string precioStr = prod.Precio.ToString(CultureInfo.InvariantCulture);
                         string subtotalStr = subtotal.ToString(CultureInfo.InvariantCulture);
 
-                        // 🛠️ CORRECCIÓN PLURAL: Apuntamos a 'detalleventas'
                         string sqlInsertDetalle = $@"
                             EXEC('
                                 INSERT INTO detalleventas (IdVenta, IdProducto, NombreProducto, Cantidad, PrecioUnitario, Subtotal, IdUsuarioCreacion)
@@ -150,9 +191,6 @@ namespace ElotePosMvc.Controllers
             }
             catch (Exception ex)
             {
-                Console.WriteLine("ERROR MYSQL: " + ex.Message);
-                if (ex.InnerException != null) Console.WriteLine("INNER: " + ex.InnerException.Message);
-
                 return StatusCode(500, "Error guardando venta: " + ex.Message);
             }
         }
